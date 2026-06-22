@@ -10,41 +10,57 @@ app.use(express.json());
 const pool = mysql.createPool({
   host: 'localhost',
   user: 'root',
-  password: 'Ankush1234#', // <--- PUT YOUR PASSWORD HERE
+  password: 'Ankush1234#', // ⚠️ Remember to hide this later if making your repo public!
   database: 'nextstep_sports',
 });
 
 const TEAMS = ['RCB', 'MI', 'CSK', 'GT', 'SRH', 'RR', 'PBKS', 'DC', 'KKR', 'LSG'];
 
-// 2. Route for Graph Data (Calculates live points from MySQL)
+// 2. Route for Graph Data (Calculates live points from the NEW massive CSV table)
 app.get('/api/graph-data', async (req, res) => {
   try {
-    const [matches] = await pool.query('SELECT * FROM matches ORDER BY id ASC');
+    // Notice the backticks around the table name because it has a period in it!
+    const [matches] = await pool.query('SELECT * FROM `ipl_match_data1.sql` ORDER BY id ASC');
     
     let teamStats = {};
     TEAMS.forEach(team => {
       teamStats[team] = { points: 0, matchesPlayed: 0 };
     });
 
-    let graphData = Array.from({ length: 15 }, (_, i) => ({ matchSeq: i }));
+    // Expanded graph length to 80 to fit a full 74-match IPL season
+    let graphData = Array.from({ length: 21 }, (_, i) => ({ matchSeq: i }));
     TEAMS.forEach(t => graphData[0][t] = 0);
 
     matches.forEach(match => {
-      if (teamStats[match.team_a]) {
-        teamStats[match.team_a].matchesPlayed += 1;
-        let seq = teamStats[match.team_a].matchesPlayed;
-        if (match.winner === match.team_a) teamStats[match.team_a].points += 2;
+      // Pulling the new column names from your imported CSV
+      let teamA = match.t1_short_name;
+      let teamB = match.t2_short_name;
+      
+      // Safely figure out who won
+      let matchWinner = null;
+      if (match.winner == match.team1_id || match.winner === teamA || match.winner === match.team1) matchWinner = teamA;
+      if (match.winner == match.team2_id || match.winner === teamB || match.winner === match.team2) matchWinner = teamB;
+
+      if (teamStats[teamA]) {
+        teamStats[teamA].matchesPlayed += 1;
+        let seq = teamStats[teamA].matchesPlayed;
+        if (matchWinner === teamA) teamStats[teamA].points += 2;
         
-        graphData[seq][match.team_a] = teamStats[match.team_a].points;
-        graphData[seq][`${match.team_a}_id`] = match.id;
+        if(graphData[seq]) {
+            graphData[seq][teamA] = teamStats[teamA].points;
+            graphData[seq][`${teamA}_id`] = match.id;
+        }
       }
-      if (teamStats[match.team_b]) {
-        teamStats[match.team_b].matchesPlayed += 1;
-        let seq = teamStats[match.team_b].matchesPlayed;
-        if (match.winner === match.team_b) teamStats[match.team_b].points += 2;
+      
+      if (teamStats[teamB]) {
+        teamStats[teamB].matchesPlayed += 1;
+        let seq = teamStats[teamB].matchesPlayed;
+        if (matchWinner === teamB) teamStats[teamB].points += 2;
         
-        graphData[seq][match.team_b] = teamStats[match.team_b].points;
-        graphData[seq][`${match.team_b}_id`] = match.id;
+        if(graphData[seq]) {
+            graphData[seq][teamB] = teamStats[teamB].points;
+            graphData[seq][`${teamB}_id`] = match.id;
+        }
       }
     });
 
@@ -54,12 +70,27 @@ app.get('/api/graph-data', async (req, res) => {
   }
 });
 
-// 3. Route for Match Details (Fetches single match from MySQL)
+// 3. Route for Match Details (Translates new massive DB into the clean React format)
 app.get('/api/match/:id', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM matches WHERE id = ?', [req.params.id]);
+    const [rows] = await pool.query('SELECT * FROM `ipl_match_data1.sql` WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: "Match not found" });
-    res.json(rows[0]);
+    
+    const dbMatch = rows[0];
+    
+    // The Translator: Takes the complex CSV columns and maps them to what React expects
+    const frontendMatch = {
+      team_a: dbMatch.t1_short_name || dbMatch.team1,
+      team_b: dbMatch.t2_short_name || dbMatch.team2,
+      winner: dbMatch.result || "Draw/No Result", 
+      win_margin: "", // The CSV bundles this inside 'result'
+      venue: dbMatch.venue || "Unknown Venue",
+      first_innings_score: dbMatch.score ? dbMatch.score.toString() : "N/A",
+      top_scorer: "Check Scorecard", // The CSV doesn't track top scorer by name
+      player_of_match: dbMatch.mom || "N/A" 
+    };
+    
+    res.json(frontendMatch);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
