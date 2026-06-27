@@ -10,7 +10,7 @@ app.use(express.json());
 const pool = mysql.createPool({
   host: 'localhost',
   user: 'root',
-  password: 'Ankush1234#', // ⚠️ Remember to hide this later if making your repo public!
+  password: 'Ankush1234#', 
   database: 'nextstep_sports',
 });
 
@@ -23,11 +23,13 @@ app.get('/api/graph-data', async (req, res) => {
     const [matches] = await pool.query('SELECT * FROM `ipl_match_data1.sql` ORDER BY id ASC');
     
     let teamStats = {};
+    let matchIds = {}; // Separate object to store match IDs
     TEAMS.forEach(team => {
       teamStats[team] = { points: 0, matchesPlayed: 0 };
+      matchIds[team] = {};
     });
 
-    // Expanded graph length to 80 to fit a full 74-match IPL season
+    // Expanded graph length to fit IPL season
     let graphData = Array.from({ length: 21 }, (_, i) => ({ matchSeq: i }));
     TEAMS.forEach(t => graphData[0][t] = 0);
 
@@ -48,7 +50,7 @@ app.get('/api/graph-data', async (req, res) => {
         
         if(graphData[seq]) {
             graphData[seq][teamA] = teamStats[teamA].points;
-            graphData[seq][`${teamA}_id`] = match.id;
+            matchIds[teamA][seq] = match.id;
         }
       }
       
@@ -59,9 +61,18 @@ app.get('/api/graph-data', async (req, res) => {
         
         if(graphData[seq]) {
             graphData[seq][teamB] = teamStats[teamB].points;
-            graphData[seq][`${teamB}_id`] = match.id;
+            matchIds[teamB][seq] = match.id;
         }
       }
+    });
+
+    // Add match IDs to graphData in a structured way (not mixed with points)
+    graphData.forEach((row, idx) => {
+      TEAMS.forEach(team => {
+        if (matchIds[team][idx]) {
+          row[`${team}_id`] = matchIds[team][idx];
+        }
+      });
     });
 
     res.json(graphData);
