@@ -16,6 +16,12 @@ const pool = mysql.createPool({
 
 const TEAMS = ['RCB', 'MI', 'CSK', 'GT', 'SRH', 'RR', 'PBKS', 'DC', 'KKR', 'LSG'];
 
+const getMatchWinner = (match) => {
+  if (match.winner == match.team1_id || match.winner === match.t1_short_name || match.winner === match.team1) return match.t1_short_name;
+  if (match.winner == match.team2_id || match.winner === match.t2_short_name || match.winner === match.team2) return match.t2_short_name;
+  return null;
+};
+
 // 2. Route for Graph Data (Calculates live points cleanly)
 app.get('/api/graph-data', async (req, res) => {
   try {
@@ -31,10 +37,7 @@ app.get('/api/graph-data', async (req, res) => {
     matches.forEach(match => {
       let teamA = match.t1_short_name;
       let teamB = match.t2_short_name;
-      
-      let matchWinner = null;
-      if (match.winner == match.team1_id || match.winner === teamA || match.winner === match.team1) matchWinner = teamA;
-      if (match.winner == match.team2_id || match.winner === teamB || match.winner === match.team2) matchWinner = teamB;
+      let matchWinner = getMatchWinner(match);
 
       // Update Team A
       if (teamStats[teamA]) {
@@ -79,7 +82,52 @@ app.get('/api/graph-data', async (req, res) => {
   }
 });
 
-// 3. Route for Match Details
+// 3. Route for Points Summary
+app.get('/api/points-summary', async (req, res) => {
+  try {
+    const [matches] = await pool.query('SELECT * FROM `ipl_match_data1.sql` ORDER BY id ASC');
+
+    const teamStats = {};
+    TEAMS.forEach(team => {
+      teamStats[team] = { points: 0, cells: [] };
+    });
+
+    matches.forEach(match => {
+      const teamA = match.t1_short_name;
+      const teamB = match.t2_short_name;
+      const matchWinner = getMatchWinner(match);
+
+      if (teamStats[teamA]) {
+        if (matchWinner === teamA) teamStats[teamA].points += 2;
+        teamStats[teamA].cells.push({
+          result: matchWinner === teamA ? 'win' : matchWinner ? 'loss' : 'draw',
+          points: teamStats[teamA].points
+        });
+      }
+
+      if (teamStats[teamB]) {
+        if (matchWinner === teamB) teamStats[teamB].points += 2;
+        teamStats[teamB].cells.push({
+          result: matchWinner === teamB ? 'win' : matchWinner ? 'loss' : 'draw',
+          points: teamStats[teamB].points
+        });
+      }
+    });
+
+    const matchCount = Math.max(14, Math.max(...TEAMS.map(team => teamStats[team].cells.length)));
+
+    const rows = TEAMS.map(team => ({
+      team,
+      cells: Array.from({ length: matchCount }, (_, index) => teamStats[team].cells[index] || null)
+    }));
+
+    res.json({ matchCount, rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. Route for Match Details
 app.get('/api/match/:id', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM `ipl_match_data1.sql` WHERE id = ?', [req.params.id]);

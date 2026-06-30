@@ -39,6 +39,7 @@ const CustomDot = (props) => {
 
 export default function App() {
   const [graphData, setGraphData] = useState([]);
+  const [pointsSummary, setPointsSummary] = useState({ matchCount: 14, rows: [] });
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedSeq, setSelectedSeq] = useState(null);
@@ -52,10 +53,16 @@ export default function App() {
       .then((res) => {
         setGraphData(res.data);
         if (res.data.length > 0) {
-            setSelectedSeq(res.data.length - 1); // Default to the final match state
+            setSelectedSeq(res.data.length - 1);
         }
       })
       .catch((err) => console.error("Database Error:", err));
+
+    axios.get('http://localhost:5001/api/points-summary')
+      .then((res) => {
+        setPointsSummary(res.data);
+      })
+      .catch((err) => console.error("Summary Error:", err));
   }, []);
 
   const handleDotClick = async (payload, dataKey) => {
@@ -184,6 +191,61 @@ export default function App() {
                       <td style={{ padding: '16px', textAlign: 'right', fontWeight: '800', fontSize: '18px', color: '#111827' }}>
                         {row.points}
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* POINTS SUMMARY TABLE */}
+          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '24px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}>
+            <h3 style={{ margin: '0 0 20px 0', fontSize: '18px', color: '#111827', fontWeight: '700' }}>
+              Points Summary
+            </h3>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', minWidth: '700px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #f3f4f6', color: '#9ca3af', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <th style={{ padding: '10px 8px', textAlign: 'left' }}>Team</th>
+                    {Array.from({ length: Math.max(14, pointsSummary.matchCount) }, (_, index) => (
+                      <th key={`match-${index + 1}`} style={{ padding: '10px 6px', whiteSpace: 'nowrap' }}>Match {index + 1}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pointsSummary.rows.map((row) => (
+                    <tr key={row.team} style={{ borderBottom: '1px solid #f9fafb' }}>
+                      <td style={{ padding: '10px 8px', textAlign: 'left', fontWeight: '700', color: '#111827' }}>{row.team}</td>
+                      {row.cells.map((cell, index) => (
+                        <td key={`${row.team}-${index + 1}`} style={{ padding: '6px' }}>
+                          {cell ? (
+                            <div
+                              style={{
+                                width: '44px',
+                                height: '40px',
+                                margin: '0 auto',
+                                borderRadius: '8px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: '700',
+                                color: '#fff',
+                                background: cell.result === 'win' ? '#16a34a' : cell.result === 'loss' ? '#dc2626' : '#f59e0b',
+                                lineHeight: 1.1
+                              }}
+                            >
+                              <span style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.95 }}>
+                                {cell.result === 'win' ? 'W' : cell.result === 'loss' ? 'L' : 'D'}
+                              </span>
+                              <span style={{ fontSize: '12px', marginTop: '2px' }}>{cell.points}</span>
+                            </div>
+                          ) : (
+                            <div style={{ width: '34px', height: '34px', margin: '0 auto', borderRadius: '8px', background: '#f3f4f6' }} />
+                          )}
+                        </td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>
