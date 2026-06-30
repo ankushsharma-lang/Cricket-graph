@@ -16,64 +16,62 @@ const pool = mysql.createPool({
 
 const TEAMS = ['RCB', 'MI', 'CSK', 'GT', 'SRH', 'RR', 'PBKS', 'DC', 'KKR', 'LSG'];
 
-// 2. Route for Graph Data (Calculates live points from the NEW massive CSV table)
+// 2. Route for Graph Data (Calculates live points cleanly)
 app.get('/api/graph-data', async (req, res) => {
   try {
-    // Notice the backticks around the table name because it has a period in it!
     const [matches] = await pool.query('SELECT * FROM `ipl_match_data1.sql` ORDER BY id ASC');
     
+    // Step A: Track the history of each team independently
     let teamStats = {};
-    let matchIds = {}; // Separate object to store match IDs
     TEAMS.forEach(team => {
-      teamStats[team] = { points: 0, matchesPlayed: 0 };
-      matchIds[team] = {};
+      // Everyone starts at match 0 with 0 points
+      teamStats[team] = { points: 0, history: [0], ids: [null] }; 
     });
 
-    // Expanded graph length to fit IPL season
-    let graphData = Array.from({ length: 21 }, (_, i) => ({ matchSeq: i }));
-    TEAMS.forEach(t => graphData[0][t] = 0);
-
     matches.forEach(match => {
-      // Pulling the new column names from your imported CSV
       let teamA = match.t1_short_name;
       let teamB = match.t2_short_name;
       
-      // Safely figure out who won
       let matchWinner = null;
       if (match.winner == match.team1_id || match.winner === teamA || match.winner === match.team1) matchWinner = teamA;
       if (match.winner == match.team2_id || match.winner === teamB || match.winner === match.team2) matchWinner = teamB;
 
+      // Update Team A
       if (teamStats[teamA]) {
-        teamStats[teamA].matchesPlayed += 1;
-        let seq = teamStats[teamA].matchesPlayed;
         if (matchWinner === teamA) teamStats[teamA].points += 2;
-        
-        if(graphData[seq]) {
-            graphData[seq][teamA] = teamStats[teamA].points;
-            matchIds[teamA][seq] = match.id;
-        }
+        teamStats[teamA].history.push(teamStats[teamA].points);
+        teamStats[teamA].ids.push(match.id);
       }
       
+      // Update Team B
       if (teamStats[teamB]) {
-        teamStats[teamB].matchesPlayed += 1;
-        let seq = teamStats[teamB].matchesPlayed;
         if (matchWinner === teamB) teamStats[teamB].points += 2;
-        
-        if(graphData[seq]) {
-            graphData[seq][teamB] = teamStats[teamB].points;
-            matchIds[teamB][seq] = match.id;
-        }
+        teamStats[teamB].history.push(teamStats[teamB].points);
+        teamStats[teamB].ids.push(match.id);
       }
     });
 
-    // Add match IDs to graphData in a structured way (not mixed with points)
-    graphData.forEach((row, idx) => {
+    // Step B: Find the maximum matches any team has played (Usually 14)
+    let maxMatches = 0;
+    TEAMS.forEach(team => {
+      if (teamStats[team].history.length - 1 > maxMatches) {
+        maxMatches = teamStats[team].history.length - 1;
+      }
+    });
+
+    // Step C: Transpose into Recharts format!
+    let graphData = [];
+    for (let i = 0; i <= maxMatches; i++) {
+      let row = { matchSeq: i };
       TEAMS.forEach(team => {
-        if (matchIds[team][idx]) {
-          row[`${team}_id`] = matchIds[team][idx];
+        // Only plot a dot if the team has actually played this match number
+        if (i < teamStats[team].history.length) {
+          row[team] = teamStats[team].history[i];
+          if (i > 0) row[`${team}_id`] = teamStats[team].ids[i];
         }
       });
-    });
+      graphData.push(row);
+    }
 
     res.json(graphData);
   } catch (error) {
@@ -81,7 +79,7 @@ app.get('/api/graph-data', async (req, res) => {
   }
 });
 
-// 3. Route for Match Details (Translates new massive DB into the clean React format)
+// 3. Route for Match Details
 app.get('/api/match/:id', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM `ipl_match_data1.sql` WHERE id = ?', [req.params.id]);
@@ -89,15 +87,14 @@ app.get('/api/match/:id', async (req, res) => {
     
     const dbMatch = rows[0];
     
-    // The Translator: Takes the complex CSV columns and maps them to what React expects
     const frontendMatch = {
       team_a: dbMatch.t1_short_name || dbMatch.team1,
       team_b: dbMatch.t2_short_name || dbMatch.team2,
       winner: dbMatch.result || "Draw/No Result", 
-      win_margin: "", // The CSV bundles this inside 'result'
+      win_margin: "", 
       venue: dbMatch.venue || "Unknown Venue",
       first_innings_score: dbMatch.score ? dbMatch.score.toString() : "N/A",
-      top_scorer: "Check Scorecard", // The CSV doesn't track top scorer by name
+      top_scorer: "Check Scorecard", 
       player_of_match: dbMatch.mom || "N/A" 
     };
     
@@ -108,6 +105,4 @@ app.get('/api/match/:id', async (req, res) => {
 });
 
 const PORT = 5001;
-app.listen(PORT, () => {
-  console.log(`🚀 Real MySQL Server connected! Running on http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
